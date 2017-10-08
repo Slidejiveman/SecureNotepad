@@ -1,3 +1,5 @@
+import org.apache.commons.codec.binary.Base64;
+
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
 import javax.crypto.IllegalBlockSizeException;
@@ -8,8 +10,6 @@ import javax.swing.*;
 import java.awt.*;
 import java.io.*;
 import java.security.*;
-import java.util.Arrays;
-import java.util.HashMap;
 import java.util.Scanner;
 
 /**
@@ -21,16 +21,13 @@ class NotePad extends JFrame {
     private int fileToOpen, fileToSave;
     private JFileChooser fileOpen, fileSave;
     private String queryTitle = "Encrypt?";
-    private String[] options = {"Yes", "No"};
     private String query = "Would you like to encrypt this file?";
     private String passwordLabelText = "Password: ";
     private String passwordPaneTitle = "Enter an Encryption/Decryption Key";
-    private HashMap<byte[], SecretKeySpec> keyMap = new HashMap<>();
-    //private byte[] key;
+    private IvParameterSpec iv;
 
     NotePad() {
         MenuBar menuBar = new MenuBar();
-        MenuItem menuItem = new MenuItem();
         final JTextArea textArea = new JTextArea();
         setMenuBar(menuBar);
         Menu file = new Menu("File");
@@ -59,7 +56,7 @@ class NotePad extends JFrame {
                     } else {
                         String password = askForPassword(); // Need to handle passwords (destroy after use)
                         if(!password.equals("")) {
-                            byte[] key = null; // not working...
+                            byte[] key = buildKey(password);
                             if (key != null && key.length > 0) {
                                 String cipherTextString = "";
                                 StringBuilder sb = new StringBuilder(cipherTextString);
@@ -67,13 +64,14 @@ class NotePad extends JFrame {
                                     sb.append(scan.next());
                                 }
                                 // For now, just decrypt it and don't worry about a password yet.
-                                byte[] plainText = decryptFile(key, sb.toString().getBytes());
+                                byte[] plainText = decryptFile(key, Base64.decodeBase64(sb.toString().getBytes()));
                                 textArea.append(new String(plainText, "UTF-8"));
                             }
                         } // else display that the password was invalid and set the text area to be empty
                     }
                 } catch (IOException iEx) {
                     System.err.println("I AM ERROR: Error occurred while opening file.");
+                    System.err.println(iEx.getMessage());
                 }
             }
         });
@@ -99,6 +97,7 @@ class NotePad extends JFrame {
                     out.close();
                 } catch(IOException iEx) {
                     System.err.println("I AM ERROR: There was an error saving the file.");
+                    System.err.println(iEx.getMessage());
                 }
             }
         });
@@ -143,9 +142,13 @@ class NotePad extends JFrame {
 
             // if OK was selected, then a password was entered. Beware of sizing issues here.
             if (selection == JOptionPane.OK_OPTION) {
-                char[] password = passwordField.getPassword();
-                System.out.println("The encryption password is: " + new String(password));
-                return new String(password);
+                try {
+                    char[] password = passwordField.getPassword();
+                    System.out.println("The encryption password is: " + new String(password));
+                    return new String(Base64.encodeBase64(new String(password).getBytes("UTF-8")));
+                } catch (UnsupportedEncodingException e) {
+                    System.err.println("I AM ERROR: String encoding for password is not supported.");
+                }
             }
         }
         return "";
@@ -156,7 +159,7 @@ class NotePad extends JFrame {
      * https://stackoverflow.com/questions/3451670/java-aes-and-using-my-own-key
      * @param password - the password entered in by the user
      */
-    private byte[] buildKey(String password) { // might be able to use this function of something like it for passwords
+    private byte[] buildKey(String password) {
         MessageDigest digest = null;
         byte[] key;
 
@@ -164,15 +167,18 @@ class NotePad extends JFrame {
             digest = MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException e) {
             System.err.println("I AM ERROR: The provided algorithm doesn't exist.");
+            System.err.println(e.getMessage());
         }
         try {
             if (digest != null) {
-                key = digest.digest(password.getBytes("UTF-8"));
+                key = digest.digest(Base64.decodeBase64(password.getBytes("UTF-8"))); // password is base64 encoded
                 return key;
             }
         } catch (UnsupportedEncodingException e) {
             System.err.println("I AM ERROR: The specified character set doesn't exist.");
+            System.err.println(e.getMessage());
         }
+
         return null;
     }
 
@@ -183,36 +189,38 @@ class NotePad extends JFrame {
      */
     private byte[] encryptMessage(byte[] key, String text) {
         byte[] cipherText;
-        byte[] plainText = text.getBytes();
+        byte[] plainText = Base64.encodeBase64(text.getBytes());
 
-        //TODO: Add in Initialization Vector
-        /*byte[] iv = new byte[32];
-        SecureRandom random = new SecureRandom();
-        random.nextBytes(iv);
-        IvParameterSpec ivParameterSpec = new IvParameterSpec(iv);*/
+        // Generate the iv
+        SecureRandom rnd = new SecureRandom();
+        iv = new IvParameterSpec(rnd.generateSeed(16));
 
         try {
             // This is the same key needed for decryption
             SecretKeySpec secretKeySpec = new SecretKeySpec(key, "AES"); // When no longer needed, keys must go!
-            keyMap.put(key, secretKeySpec);
             Cipher AesCipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
-            AesCipher.init(Cipher.ENCRYPT_MODE, secretKeySpec);
+            AesCipher.init(Cipher.ENCRYPT_MODE, secretKeySpec, iv);
             cipherText = AesCipher.doFinal(plainText);
             return cipherText;
         } catch (NoSuchAlgorithmException e) {
             System.err.println("I AM ERROR: The provided algorithm doesn't exist for encryption.");
+            System.err.println(e.getMessage());
         } catch (NoSuchPaddingException e) {
             System.err.println("I AM ERROR: The provided padding method doesn't exist.");
+            System.err.println(e.getMessage());
         } catch (InvalidKeyException e) {
             System.err.println("I AM ERROR: The provided key is invalid.");
             System.err.println(e.getMessage());
         } catch (BadPaddingException e) {
             System.err.println("I AM ERROR: The provided padding is bad.");
+            System.err.println(e.getMessage());
         } catch (IllegalBlockSizeException e) {
             System.err.println("I AM ERROR: The used block size is illegal.");
-        } /*catch (InvalidAlgorithmParameterException e) { // This error occurs if I use this code
+            System.err.println(e.getMessage());
+        }  catch (InvalidAlgorithmParameterException e) { // This error occurs if I use this code
             System.err.println("I AM ERROR: This iv is considered an illegal parameter.");
-        } */
+            System.err.println(e.getMessage());
+        }
 
         return null;
     }
@@ -230,9 +238,13 @@ class NotePad extends JFrame {
 
         // if OK was selected, then a password was entered. Beware of sizing issues here.
         if (selection == JOptionPane.OK_OPTION) {
-            char[] password = passwordField.getPassword(); // Don't store these in the end product
-            System.out.println("The decryption password is: " + new String(password));
-            return new String(password);
+            try {
+                char[] password = passwordField.getPassword(); // Don't store these in the end product
+                System.out.println("The decryption password is: " + new String(password));
+                return new String(Base64.encodeBase64(new String(password).getBytes("UTF-8")));
+            } catch (UnsupportedEncodingException e) {
+                System.err.println("I AM ERROR: String encoding for password is not supported.");
+            }
         }
         return "";
     }
@@ -241,22 +253,29 @@ class NotePad extends JFrame {
         byte[] plainText;
 
         try {
-            SecretKeySpec secretKeySpec = keyMap.get(key); // When no longer needed, keys must go!
+            SecretKeySpec secretKeySpec = new SecretKeySpec(key, "AES");
             Cipher AesCipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
-            AesCipher.init(Cipher.DECRYPT_MODE, secretKeySpec);
+            AesCipher.init(Cipher.DECRYPT_MODE, secretKeySpec, iv);
             plainText = AesCipher.doFinal(cipherText);
             return plainText;
         } catch (NoSuchAlgorithmException e) {
             System.err.println("I AM ERROR: The provided algorithm doesn't exist for encryption.");
+            System.err.println(e.getMessage());
         } catch (NoSuchPaddingException e) {
             System.err.println("I AM ERROR: The provided padding method doesn't exist.");
+            System.err.println(e.getMessage());
         } catch (InvalidKeyException e) {
             System.err.println("I AM ERROR: The provided key is invalid.");
             System.err.println(e.getMessage());
         } catch (BadPaddingException e) {
             System.err.println("I AM ERROR: The provided padding is bad.");
+            System.err.println(e.getMessage());
         } catch (IllegalBlockSizeException e) {
             System.err.println("I AM ERROR: The used block size is illegal.");
+            System.err.println(e.getMessage());
+        }  catch (InvalidAlgorithmParameterException e) {
+            System.err.println("I AM ERROR: This iv is considered an illegal parameter.");
+            System.err.println(e.getMessage());
         }
         return null;
     }

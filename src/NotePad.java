@@ -25,6 +25,7 @@ class NotePad extends JFrame {
     private String passwordLabelText = "Password: ";
     private String passwordPaneTitle = "Enter an Encryption/Decryption Key";
     private IvParameterSpec iv;
+    private byte[] ivBytes = new byte[16];
 
     NotePad() {
         MenuBar menuBar = new MenuBar();
@@ -47,10 +48,23 @@ class NotePad extends JFrame {
             if (fileToOpen == JFileChooser.APPROVE_OPTION) {
                 textArea.setText("");
                 try {
-                    Scanner scan = new Scanner(new FileReader(fileOpen.getSelectedFile().getPath()));
-                    // this should move the scanner past the found token
-                    if(scan.findWithinHorizon("<ENC>", 5) == null) { // is file encrypted?
-                        while (scan.hasNext()) { // if not encrypted just read everything in
+                    File f = fileOpen.getSelectedFile();
+                    byte[] tag = new byte[5];
+                    byte[] message = null;
+                    byte[] ivMsg = new byte[16];
+                    if (f.length() >= 21) { // Want to avoid negative array size
+                        message = new byte[(int) f.length() - 21];
+                        FileInputStream inputStream = new FileInputStream(f);
+                        inputStream.read(tag);
+                        inputStream.read(ivMsg);
+                        inputStream.read(message);
+                    }
+
+                    if(!new String(tag).equals("<ENC>")) {
+                        // Using a scanner because it handles the case where the file is
+                        // less than 5 bytes long
+                        Scanner scan = new Scanner(new FileReader(f.getPath()));
+                        while (scan.hasNext()) {
                             textArea.append(scan.nextLine());
                         }
                     } else {
@@ -58,13 +72,8 @@ class NotePad extends JFrame {
                         if(!password.equals("")) {
                             byte[] key = buildKey(password);
                             if (key != null && key.length > 0) {
-                                String cipherTextString = "";
-                                StringBuilder sb = new StringBuilder(cipherTextString);
-                                while (scan.hasNext()) {
-                                    sb.append(scan.next());
-                                }
                                 // For now, just decrypt it and don't worry about a password yet.
-                                byte[] plainText = decryptFile(key, Base64.decodeBase64(sb.toString().getBytes()));
+                                byte[] plainText = decryptFile(key, message, ivMsg);
                                 textArea.append(new String(plainText, "UTF-8"));
                             }
                         } // else display that the password was invalid and set the text area to be empty
@@ -87,12 +96,14 @@ class NotePad extends JFrame {
             saveFile();
             if(fileToSave == JFileChooser.APPROVE_OPTION) {
                 try {
-                    BufferedWriter out = new BufferedWriter(new FileWriter(fileSave.getSelectedFile().getPath()));
+                    FileOutputStream out = new FileOutputStream(fileSave.getSelectedFile().getPath());
                     if (!password.equals("")) {
-                        out.write("<ENC>" + new String(cipherText, "UTF-8")); // need to provide a tag to know if a file needs decryption
+                        out.write("<ENC>".getBytes());
+                        out.write(ivBytes);
+                        out.write(cipherText); // need to provide a tag to know if a file needs decryption
                     }
                     else {
-                        out.write(textArea.getText());
+                        out.write(textArea.getText().getBytes());
                     }
                     out.close();
                 } catch(IOException iEx) {
@@ -145,7 +156,7 @@ class NotePad extends JFrame {
                 try {
                     char[] password = passwordField.getPassword();
                     System.out.println("The encryption password is: " + new String(password));
-                    return new String(Base64.encodeBase64(new String(password).getBytes("UTF-8")));
+                    return new String(new String(password).getBytes("UTF-8"));
                 } catch (UnsupportedEncodingException e) {
                     System.err.println("I AM ERROR: String encoding for password is not supported.");
                 }
@@ -171,7 +182,8 @@ class NotePad extends JFrame {
         }
         try {
             if (digest != null) {
-                key = digest.digest(Base64.decodeBase64(password.getBytes("UTF-8"))); // password is base64 encoded
+                key = digest.digest(password.getBytes("UTF-8"));
+                System.out.println("This is the hash of the password: " + new String(key, "UTF-8"));
                 return key;
             }
         } catch (UnsupportedEncodingException e) {
@@ -189,18 +201,26 @@ class NotePad extends JFrame {
      */
     private byte[] encryptMessage(byte[] key, String text) {
         byte[] cipherText;
-        byte[] plainText = Base64.encodeBase64(text.getBytes());
+        byte[] plainText = null;
+        try {
+            plainText = text.getBytes("UTF-8");
+        } catch (UnsupportedEncodingException e) {
+            e.printStackTrace();
+        }
 
         // Generate the iv
         SecureRandom rnd = new SecureRandom();
-        iv = new IvParameterSpec(rnd.generateSeed(16));
+        rnd.nextBytes(ivBytes);
+        iv = new IvParameterSpec(ivBytes);
 
         try {
             // This is the same key needed for decryption
             SecretKeySpec secretKeySpec = new SecretKeySpec(key, "AES"); // When no longer needed, keys must go!
+            System.out.println("This is the encrypt function keyspec: " +new String(secretKeySpec.getEncoded()));
             Cipher AesCipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
             AesCipher.init(Cipher.ENCRYPT_MODE, secretKeySpec, iv);
             cipherText = AesCipher.doFinal(plainText);
+            System.out.println("This is the ciphertext after generation: " + new String(cipherText));
             return cipherText;
         } catch (NoSuchAlgorithmException e) {
             System.err.println("I AM ERROR: The provided algorithm doesn't exist for encryption.");
@@ -241,7 +261,7 @@ class NotePad extends JFrame {
             try {
                 char[] password = passwordField.getPassword(); // Don't store these in the end product
                 System.out.println("The decryption password is: " + new String(password));
-                return new String(Base64.encodeBase64(new String(password).getBytes("UTF-8")));
+                return new String(new String(password).getBytes("UTF-8"));
             } catch (UnsupportedEncodingException e) {
                 System.err.println("I AM ERROR: String encoding for password is not supported.");
             }
@@ -249,13 +269,15 @@ class NotePad extends JFrame {
         return "";
     }
 
-    private byte[] decryptFile(byte[] key, byte[] cipherText) { // this also needs the key
+    private byte[] decryptFile(byte[] key, byte[] cipherText, byte[] ivMsg) {
         byte[] plainText;
+        IvParameterSpec ivReadIn = new IvParameterSpec(ivMsg);
 
         try {
             SecretKeySpec secretKeySpec = new SecretKeySpec(key, "AES");
+            System.out.println("This is the decrypt function keyspec: " + new String(secretKeySpec.getEncoded()));
             Cipher AesCipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
-            AesCipher.init(Cipher.DECRYPT_MODE, secretKeySpec, iv);
+            AesCipher.init(Cipher.DECRYPT_MODE, secretKeySpec, ivReadIn);
             plainText = AesCipher.doFinal(cipherText);
             return plainText;
         } catch (NoSuchAlgorithmException e) {

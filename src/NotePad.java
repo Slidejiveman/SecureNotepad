@@ -1,5 +1,3 @@
-import org.apache.commons.codec.binary.Base64;
-
 import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
 import javax.crypto.IllegalBlockSizeException;
@@ -13,21 +11,54 @@ import java.security.*;
 import java.util.Scanner;
 
 /**
+ * This class handles the logic as well as the layout of the NotePad.
+ *
  * Created by rdnot on 10/4/2017.
  * https://www.sourcecodester.com/java/5834/how-create-notepad-project-java.html
  */
 class NotePad extends JFrame {
 
+    /**
+     * FileToOpen and FileToSave are int values that determine what
+     * JFileChooser Option was selected. It is used to determine
+     * branches in the code.
+     */
     private int fileToOpen, fileToSave;
+    /**
+     * fileOpen and fileSave are the JFileChoosers used to open and save the application
+     * respectively.
+     */
     private JFileChooser fileOpen, fileSave;
+    /**
+     * This string is used as the title of the encryption query popup.
+     */
     private String queryTitle = "Encrypt?";
+    /**
+     * This string is the query presented to the user
+     */
     private String query = "Would you like to encrypt this file?";
+    /**
+     * This string appears on the password JOptionPanes
+     */
     private String passwordLabelText = "Password: ";
+    /**
+     * This string is the title of the password JOptionPanes
+     */
     private String passwordPaneTitle = "Enter an Encryption/Decryption Key";
+    /**
+     * This is the iv used for encryption
+     */
     private IvParameterSpec iv;
+    /**
+     * These bytes are used to hold the randomly generated Initialization Vector
+     */
     private byte[] ivBytes = new byte[16];
 
+    /**
+     * The Default no argument constructor
+     */
     NotePad() {
+        // Create and layout the components
         MenuBar menuBar = new MenuBar();
         final JTextArea textArea = new JTextArea();
         setMenuBar(menuBar);
@@ -42,12 +73,17 @@ class NotePad extends JFrame {
         file.add(save);
         file.add(exit);
         getContentPane().add(textArea);
+
+        // Add the Listeners for the MenuItems
         newFile.addActionListener( e -> textArea.setText(""));
         open.addActionListener(e -> {
             openFile();
+
+            // if the user chose to encrypt
             if (fileToOpen == JFileChooser.APPROVE_OPTION) {
                 textArea.setText("");
                 try {
+                    // Open the file and read out the tag, iv, and message.
                     File f = fileOpen.getSelectedFile();
                     byte[] tag = new byte[5];
                     byte[] message = null;
@@ -60,6 +96,8 @@ class NotePad extends JFrame {
                         inputStream.read(message);
                     }
 
+                    // If tag is equal to this tag, then the message must be decrypted.
+                    // If it isn't, then just use the scanner and read all the text in.
                     if(!new String(tag).equals("<ENC>")) {
                         // Using a scanner because it handles the case where the file is
                         // less than 5 bytes long
@@ -68,15 +106,15 @@ class NotePad extends JFrame {
                             textArea.append(scan.nextLine());
                         }
                     } else {
-                        String password = askForPassword(); // Need to handle passwords (destroy after use)
+                        // We found <ENC>, so the file must be decrypted.
+                        String password = askForPassword();
                         if(!password.equals("")) {
-                            byte[] key = buildKey(password);
+                            byte[] key = buildKey(password); // the same password will hash to the same key
                             if (key != null && key.length > 0) {
-                                // For now, just decrypt it and don't worry about a password yet.
-                                byte[] plainText = decryptFile(key, message, ivMsg);
+                                byte[] plainText = decryptFile(key, message, ivMsg); // key and iv both needed for CBC
                                 textArea.append(new String(plainText, "UTF-8"));
                             }
-                        } // else display that the password was invalid and set the text area to be empty
+                        }
                     }
                 } catch (IOException iEx) {
                     System.err.println("I AM ERROR: Error occurred while opening file.");
@@ -88,13 +126,16 @@ class NotePad extends JFrame {
             byte[] cipherText = null;
             byte[] key;
 
+            // Determine if we need to encrypt the file on save.
             String password = handleEncryption();
             if (!password.equals("")) {
+                // if there is a password, then it needs to be encrypted.
                 key = buildKey(password);
                 cipherText = encryptMessage(key, textArea.getText());
             }
             saveFile();
             if(fileToSave == JFileChooser.APPROVE_OPTION) {
+                // We chose to encrypt, so write out the message, the iv, then the cipher text
                 try {
                     FileOutputStream out = new FileOutputStream(fileSave.getSelectedFile().getPath());
                     if (!password.equals("")) {
@@ -103,6 +144,7 @@ class NotePad extends JFrame {
                         out.write(cipherText); // need to provide a tag to know if a file needs decryption
                     }
                     else {
+                        // Just write out all of the bytes if we don't need to encrypt
                         out.write(textArea.getText().getBytes());
                     }
                     out.close();
@@ -115,14 +157,18 @@ class NotePad extends JFrame {
         exit.addActionListener(e -> System.exit(0));
     }
 
-    // to this method, I'll need to modify the code so it can tell whether
-    // the file is encrypted or not
+    /**
+     * Creates the Open JFileChooser and prepares it for use
+     */
     private void openFile() {
         JFileChooser open = new JFileChooser();
         fileToOpen = open.showOpenDialog(this);
         fileOpen = open;
     }
 
+    /**
+     * Creates the Save JFileChooser and prepares it for use
+     */
     private void saveFile() {
         JFileChooser save = new JFileChooser();
         fileToSave = save.showSaveDialog(this);
@@ -130,8 +176,11 @@ class NotePad extends JFrame {
     }
 
     /**
+     * Determine whether or not we want to encrypt the file. If we do, return
+     * the entered password.
+     *
      * https://stackoverflow.com/questions/8881213/joptionpane-to-get-password
-     * @return
+     * @return - the password entered by the user or the empty string if not entered.
      */
     private String handleEncryption() {
         // This value will be used to determine whether or not to encrypt the file
@@ -155,7 +204,6 @@ class NotePad extends JFrame {
             if (selection == JOptionPane.OK_OPTION) {
                 try {
                     char[] password = passwordField.getPassword();
-                    System.out.println("The encryption password is: " + new String(password));
                     return new String(new String(password).getBytes("UTF-8"));
                 } catch (UnsupportedEncodingException e) {
                     System.err.println("I AM ERROR: String encoding for password is not supported.");
@@ -166,9 +214,13 @@ class NotePad extends JFrame {
     }
 
     /**
+     * Build the key with the given password. This uses SHA-256 to hash the password
+     * into a usable key for AES/CBC encryption
+     *
      * https://stackoverflow.com/questions/3103652/hash-string-via-sha-256-in-java
      * https://stackoverflow.com/questions/3451670/java-aes-and-using-my-own-key
      * @param password - the password entered in by the user
+     * @return key - the key hashed from the password
      */
     private byte[] buildKey(String password) {
         MessageDigest digest = null;
@@ -183,7 +235,6 @@ class NotePad extends JFrame {
         try {
             if (digest != null) {
                 key = digest.digest(password.getBytes("UTF-8"));
-                System.out.println("This is the hash of the password: " + new String(key, "UTF-8"));
                 return key;
             }
         } catch (UnsupportedEncodingException e) {
@@ -195,9 +246,13 @@ class NotePad extends JFrame {
     }
 
     /**
+     * This function encrypts a message using AES in CBC mode with some padding.
+     * The padding fills out the 16 byte blocks so the block cipher is legal.
+     *
      * https://stackoverflow.com/questions/20796042/aes-encryption-and-decryption-with-java
      * @param key - the key to use for encryption
      * @param text - the text to encrypt
+     * @return cipherText - the encrypted message as an array of bytes
      */
     private byte[] encryptMessage(byte[] key, String text) {
         byte[] cipherText;
@@ -214,13 +269,11 @@ class NotePad extends JFrame {
         iv = new IvParameterSpec(ivBytes);
 
         try {
-            // This is the same key needed for decryption
-            SecretKeySpec secretKeySpec = new SecretKeySpec(key, "AES"); // When no longer needed, keys must go!
-            System.out.println("This is the encrypt function keyspec: " +new String(secretKeySpec.getEncoded()));
+            // This is the same key needed for decryption.
+            SecretKeySpec secretKeySpec = new SecretKeySpec(key, "AES");
             Cipher AesCipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
             AesCipher.init(Cipher.ENCRYPT_MODE, secretKeySpec, iv);
             cipherText = AesCipher.doFinal(plainText);
-            System.out.println("This is the ciphertext after generation: " + new String(cipherText));
             return cipherText;
         } catch (NoSuchAlgorithmException e) {
             System.err.println("I AM ERROR: The provided algorithm doesn't exist for encryption.");
@@ -245,6 +298,10 @@ class NotePad extends JFrame {
         return null;
     }
 
+    /**
+     * Asks the user for a password if the file is encrypted.
+     * @return password - the password as a string or the empty string if canceled.
+     */
     private String askForPassword() {
         // Take the steps needed to encrypt the file.
         JPanel passwordPanel = new JPanel();
@@ -260,7 +317,6 @@ class NotePad extends JFrame {
         if (selection == JOptionPane.OK_OPTION) {
             try {
                 char[] password = passwordField.getPassword(); // Don't store these in the end product
-                System.out.println("The decryption password is: " + new String(password));
                 return new String(new String(password).getBytes("UTF-8"));
             } catch (UnsupportedEncodingException e) {
                 System.err.println("I AM ERROR: String encoding for password is not supported.");
@@ -269,13 +325,23 @@ class NotePad extends JFrame {
         return "";
     }
 
+    /**
+     * This method decrypts the file by doing the same operations as the encryption method
+     * but opening the Cipher in the decryption mode
+     *
+     * TODO: Combine the encryption and decryption methods. Pass in a flag in order to determine the mode
+     *
+     * @param key - the key used for the decryption
+     * @param cipherText - the ciphertext to decrypt
+     * @param ivMsg - the initialization vector stored with the file
+     * @return plaintext - the array of plaintext as bytes
+     */
     private byte[] decryptFile(byte[] key, byte[] cipherText, byte[] ivMsg) {
         byte[] plainText;
         IvParameterSpec ivReadIn = new IvParameterSpec(ivMsg);
 
         try {
             SecretKeySpec secretKeySpec = new SecretKeySpec(key, "AES");
-            System.out.println("This is the decrypt function keyspec: " + new String(secretKeySpec.getEncoded()));
             Cipher AesCipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
             AesCipher.init(Cipher.DECRYPT_MODE, secretKeySpec, ivReadIn);
             plainText = AesCipher.doFinal(cipherText);
@@ -289,9 +355,11 @@ class NotePad extends JFrame {
         } catch (InvalidKeyException e) {
             System.err.println("I AM ERROR: The provided key is invalid.");
             System.err.println(e.getMessage());
+            showDecryptionFailure(); // Display that the decryption did not succeed.
         } catch (BadPaddingException e) {
             System.err.println("I AM ERROR: The provided padding is bad.");
             System.err.println(e.getMessage());
+            showDecryptionFailure(); // Display that the decryption did not succeed.
         } catch (IllegalBlockSizeException e) {
             System.err.println("I AM ERROR: The used block size is illegal.");
             System.err.println(e.getMessage());
@@ -300,5 +368,12 @@ class NotePad extends JFrame {
             System.err.println(e.getMessage());
         }
         return null;
+    }
+
+    private void showDecryptionFailure() {
+        JOptionPane.showOptionDialog(this,
+                "The decryption did not succeed.","Decryption Failure",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE, null, null,
+                JOptionPane.OK_OPTION);
     }
 }

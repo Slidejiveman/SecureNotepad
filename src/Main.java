@@ -11,7 +11,7 @@ import javax.swing.*;
  * This project relies on this tutorial that I used to get a better understanding of
  * how Java can be used to make a text editor using Swing and AWT. Credit for the base NotePad
  * functionality belongs to this source.
- * @see https://www.sourcecodester.com/java/5834/how-create-notepad-project-java.html
+ * Reference: https://www.sourcecodester.com/java/5834/how-create-notepad-project-java.html
  */
 public class Main {
 
